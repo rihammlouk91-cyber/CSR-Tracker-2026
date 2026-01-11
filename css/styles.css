@@ -228,11 +228,18 @@ textarea{min-height: 100px; resize: vertical;}
   position:fixed;
   inset:0;
   background: rgba(15,23,42,0.45);
-  display:flex;
   align-items:center;
   justify-content:center;
   padding: 16px;
   z-index: 20;
+ 
+  /* IMPORTANT: hidden by default */
+  display: none;
+}
+ 
+/* Show only when NOT hidden */
+.modal:not([hidden]){
+  display: flex;
 }
 .modal-card{
   width: min(780px, 96vw);
@@ -309,3 +316,4 @@ textarea{min-height: 100px; resize: vertical;}
 .modal[hidden] { 
   display: none !important; 
 }
+
