@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CSR Tracker</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- FullCalendar -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css">
+
+  <!-- App styles -->
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">CSR</div>
+        <div>
+          <div class="brand-title">CSR Tracker</div>
+          <div class="brand-sub">Projects • Tasks • Comms</div>
+        </div>
+      </div>
+
+      <div class="userbox">
+        <div class="avatar" id="userAvatar">?</div>
+        <div class="user-meta">
+          <div class="user-name" id="userName">Not signed in</div>
+          <div class="user-role" id="userRole">—</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-tab="dashboard">Dashboard</button>
+        <button class="nav-item" data-tab="analytics">Analytics</button>
+        <button class="nav-item" data-tab="calendar">Calendar</button>
+        <button class="nav-item" data-tab="projects">Projects</button>
+        <button class="nav-item" data-tab="kanban">Kanban</button>
+        <button class="nav-item" data-tab="workload">Workload</button>
+        <button class="nav-item" data-tab="comms">Branding & Communication</button>
+        <button class="nav-item admin-only" data-tab="audit">Audit Trail</button>
+        <button class="nav-item" data-tab="data">Data Export</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="btn ghost" id="toggleSidebar">☰</button>
+        <button class="btn" id="signOutBtn">Sign out</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- Top bar -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 id="pageTitle">Dashboard</h1>
+          <div class="subtitle" id="pageSubtitle">Overview of active projects and tasks</div>
+        </div>
+        <div class="topbar-right">
+          <button class="btn soft" id="quickAddProjectBtn">+ Project</button>
+          <button class="btn soft" id="quickAddCommBtn">+ Communication</button>
+        </div>
+      </header>
+
+      <!-- Auth Gate -->
+      <section class="auth-card" id="authGate">
+        <div class="card">
+          <div class="card-header">
+            <h2>Sign in</h2>
+            <p>Use your work email (Firebase Auth)</p>
+          </div>
+          <div class="card-body grid2">
+            <div>
+              <label>Email</label>
+              <input id="loginEmail" type="email" placeholder="name@company.com" />
+            </div>
+            <div>
+              <label>Password</label>
+              <input id="loginPassword" type="password" placeholder="••••••••" />
+            </div>
+            <div class="grid-span-2">
+              <button class="btn" id="loginBtn">Sign in</button>
+              <button class="btn ghost" id="registerBtn">Create account</button>
+              <div class="hint">Admins are controlled by Firestore roles (no one becomes admin by accident).</div>
+              <div class="error" id="authError" hidden></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tabs -->
+      <section class="tabs" id="tabs" hidden>
+
+        <!-- DASHBOARD -->
+        <section class="tab active" id="tab-dashboard">
+          <div class="grid cards3">
+            <div class="card kpi">
+              <div class="kpi-label">Active Projects</div>
+              <div class="kpi-value" id="kpiActiveProjects">0</div>
+              <div class="kpi-sub" id="kpiActiveProjectsSub">—</div>
+            </div>
+            <div class="card kpi warn">
+              <div class="kpi-label">Overdue Tasks</div>
+              <div class="kpi-value" id="kpiOverdueTasks">0</div>
+              <div class="kpi-sub">Deadline passed</div>
+            </div>
+            <div class="card kpi">
+              <div class="kpi-label">Due This Week</div>
+              <div class="kpi-value" id="kpiDueWeek">0</div>
+              <div class="kpi-sub">Next 7 days</div>
+            </div>
+          </div>
+
+          <div class="grid grid2">
+            <div class="card">
+              <div class="card-header row">
+                <h3>High priority pending tasks</h3>
+                <div class="pill">Top focus</div>
+              </div>
+              <div class="card-body">
+                <div class="list" id="listHighPriority"></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header row">
+                <h3>Project completion rate</h3>
+                <div class="pill soft">Active projects</div>
+              </div>
+              <div class="card-body">
+                <div class="list" id="listProjectCompletion"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid2">
+            <div class="card">
+              <div class="card-header row">
+                <h3>Overdue (headlines)</h3>
+                <div class="pill warn">Needs action</div>
+              </div>
+              <div class="card-body">
+                <div class="list" id="listOverdue"></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header row">
+                <h3>Due this week (headlines)</h3>
+                <div class="pill">Plan</div>
+              </div>
+              <div class="card-body">
+                <div class="list" id="listDueWeek"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ANALYTICS -->
+        <section class="tab" id="tab-analytics">
+          <div class="grid grid2">
+            <div class="card">
+              <div class="card-header row">
+                <h3>Overall analytics</h3>
+                <select id="overallMetric">
+                  <option value="volunteers">Volunteers (Internal vs External)</option>
+                  <option value="beneficiaries">Beneficiaries</option>
+                  <option value="budget">Budget utilized</option>
+                </select>
+              </div>
+              <div class="card-body">
+                <canvas id="overallChart" height="140"></canvas>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header row">
+                <h3>Per-project analytics</h3>
+                <select id="projectAnalyticsSelect"></select>
+              </div>
+              <div class="card-body">
+                <canvas id="projectChart" height="140"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header row">
+              <h3>Project financials</h3>
+              <div class="pill soft">Budget vs utilized</div>
+            </div>
+            <div class="card-body">
+              <div class="table-wrap">
+                <table class="table" id="financeTable">
+                  <thead>
+                    <tr>
+                      <th>Project</th>
+                      <th>Budget (AED)</th>
+                      <th>Utilized (AED)</th>
+                      <th>Utilization %</th>
+                      <th>Beneficiaries (Target / Actual)</th>
+                      <th>Volunteers (Int / Ext)</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- CALENDAR -->
+        <section class="tab" id="tab-calendar">
+          <div class="grid grid2">
+            <div class="card">
+              <div class="card-header row">
+                <h3>Leave calendar</h3>
+                <button class="btn soft" id="addLeaveBtn">+ Add leave</button>
+              </div>
+              <div class="card-body">
+                <div class="hint">Shows team leave + planned leave. Project timelines appear as colored bars.</div>
+                <div id="calendar"></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header row">
+                <h3>Leave list</h3>
+                <div class="pill soft">Click to edit</div>
+              </div>
+              <div class="card-body">
+                <div class="list" id="leaveList"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- PROJECTS -->
+        <section class="tab" id="tab-projects">
+          <div class="grid grid2">
+            <div class="card">
+              <div class="card-header row">
+                <h3>Projects</h3>
+                <button class="btn soft" id="addProjectBtn">+ New project</button>
+              </div>
+              <div class="card-body">
+                <input class="search" id="projectSearch" placeholder="Search projects..." />
+                <div class="list" id="projectList"></div>
+              </div>
+            </div>
+
+            <div class="card" id="projectDetailsCard">
+              <div class="card-header row">
+                <h3 id="projectDetailsTitle">Select a project</h3>
+                <button class="btn soft" id="addTaskBtn" disabled>+ New task</button>
+              </div>
+              <div class="card-body">
+                <div class="hint" id="projectDetailsMeta">Pick a project to see tasks.</div>
+                <div class="table-wrap">
+                  <table class="table" id="taskTable">
+                    <thead>
+                      <tr>
+                        <th>Task</th>
+                        <th>Status</th>
+                        <th>Priority</th>
+                        <th>Owner</th>
+                        <th>Support team</th>
+                        <th>Deadline</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- KANBAN -->
+        <section class="tab" id="tab-kanban">
+          <div class="card">
+            <div class="card-header row">
+              <h3>Projects kanban</h3>
+              <div class="pill soft">Drag & drop</div>
+            </div>
+            <div class="card-body">
+              <div class="kanban" id="kanbanBoard">
+                <div class="kanban-col" data-status="Pending">
+                  <div class="kanban-title">Pending</div>
+                  <div class="kanban-drop" data-drop="Pending"></div>
+                </div>
+                <div class="kanban-col" data-status="Ongoing">
+                  <div class="kanban-title">Ongoing</div>
+                  <div class="kanban-drop" data-drop="Ongoing"></div>
+                </div>
+                <div class="kanban-col" data-status="On Hold">
+                  <div class="kanban-title">On Hold</div>
+                  <div class="kanban-drop" data-drop="On Hold"></div>
+                </div>
+                <div class="kanban-col" data-status="Completed">
+                  <div class="kanban-title">Completed</div>
+                  <div class="kanban-drop" data-drop="Completed"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- WORKLOAD -->
+        <section class="tab" id="tab-workload">
+          <div class="grid grid2">
+            <div class="card">
+              <div class="card-header row">
+                <h3>Workload by member</h3>
+                <div class="pill soft">Owner counts</div>
+              </div>
+              <div class="card-body">
+                <div class="list" id="memberWorkloadList"></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header row">
+                <h3 id="memberDetailsTitle">Select a member</h3>
+                <div class="pill">Projects</div>
+              </div>
+              <div class="card-body">
+                <div class="list" id="memberProjectsList"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- COMMS -->
+        <section class="tab" id="tab-comms">
+          <div class="grid cards3">
+            <div class="card kpi">
+              <div class="kpi-label">Active Communications</div>
+              <div class="kpi-value" id="kpiActiveComms">0</div>
+              <div class="kpi-sub">In progress</div>
+            </div>
+            <div class="card kpi warn">
+              <div class="kpi-label">Overdue Communication Tasks</div>
+              <div class="kpi-value" id="kpiOverdueComms">0</div>
+              <div class="kpi-sub">Deadline passed</div>
+            </div>
+            <div class="card kpi">
+              <div class="kpi-label">Due This Week</div>
+              <div class="kpi-value" id="kpiDueCommsWeek">0</div>
+              <div class="kpi-sub">Next 7 days</div>
+            </div>
+          </div>
+
+          <div class="grid grid2">
+            <div class="card">
+              <div class="card-header row">
+                <h3>Communications list</h3>
+                <button class="btn soft" id="addCommBtn">+ New communication</button>
+              </div>
+              <div class="card-body">
+                <input class="search" id="commSearch" placeholder="Search communications..." />
+                <div class="list" id="commList"></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header row">
+                <h3>High priority pending tasks</h3>
+                <div class="pill soft">Comms</div>
+              </div>
+              <div class="card-body">
+                <div class="list" id="commHighPriorityList"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- AUDIT (ADMIN ONLY) -->
+        <section class="tab" id="tab-audit">
+          <div class="card">
+            <div class="card-header row">
+              <h3>Audit trail</h3>
+              <div class="pill warn">Admin only</div>
+            </div>
+            <div class="card-body">
+              <div class="hint">Tracks create/update actions with field-level diffs.</div>
+              <div class="table-wrap">
+                <table class="table" id="auditTable">
+                  <thead>
+                    <tr>
+                      <th>When</th>
+                      <th>Who</th>
+                      <th>Type</th>
+                      <th>Title</th>
+                      <th>Action</th>
+                      <th>Changes</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- DATA EXPORT -->
+        <section class="tab" id="tab-data">
+          <div class="grid grid2">
+            <div class="card">
+              <div class="card-header row">
+                <h3>Export data</h3>
+                <div class="pill soft">Browser download</div>
+              </div>
+              <div class="card-body">
+                <label>Dataset</label>
+                <select id="exportDataset">
+                  <option value="projects">Projects</option>
+                  <option value="tasks">Tasks</option>
+                  <option value="communications">Communications</option>
+                  <option value="leaves">Leaves</option>
+                  <option value="audit_logs">Audit logs (admin)</option>
+                </select>
+
+                <div class="row gap">
+                  <button class="btn" id="exportJsonBtn">Download JSON</button>
+                  <button class="btn soft" id="exportCsvBtn">Download CSV</button>
+                </div>
+                <div class="hint">This exports from Firestore based on your access rights.</div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header row">
+                <h3>Seed / team members</h3>
+                <div class="pill">Setup</div>
+              </div>
+              <div class="card-body">
+                <div class="hint">Add team members in Firestore: <code>members</code> collection.</div>
+                <div class="hint">Roles in Firestore: <code>roles/{uid}</code> => { role: "admin" | "csr" }</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </section>
+    </main>
+  </div>
+
+  <!-- Modals -->
+  <div class="modal" id="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modalTitle">Modal</h3>
+        <button class="icon-btn" id="closeModalBtn">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer" id="modalFooter"></div>
+    </div>
+  </div>
+
+  <!-- Firebase + Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+
+  <!-- Firebase (compat for simplicity) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+
+  <!-- App scripts -->
+  <script src="js/firebase.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/analytics.js"></script>
+  <script src="js/calendar.js"></script>
+  <script src="js/kanban.js"></script>
+  <script src="js/export.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
