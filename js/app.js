@@ -1,17 +1,9 @@
-/* =========================
-   GLOBAL STATE
-========================= */
 let state = {
   projects: [],
   tasks: [],
-  comms: [],
-  leaves: [],
   selectedProjectId: null,
 };
 
-/* =========================
-   UTILITIES
-========================= */
 function isOverdue(dateStr) {
   if (!dateStr) return false;
   const d = new Date(dateStr);
@@ -32,29 +24,20 @@ function isDueWithinDays(dateStr, days) {
 }
 
 function completionRateForProject(pid) {
-  const list = state.tasks.filter(t => t.projectId === pid);
-  if (!list.length) return 0;
-  const done = list.filter(t => (t.status || "").toLowerCase() === "completed").length;
-  return Math.round((done / list.length) * 100);
+  const tasks = state.tasks.filter(t => t.projectId === pid);
+  if (!tasks.length) return 0;
+  const done = tasks.filter(t => (t.status || "").toLowerCase() === "completed").length;
+  return Math.round((done / tasks.length) * 100);
 }
 
-/* =========================
-   UI VISIBILITY
-========================= */
 function setAdminVisibility(role) {
-  document.querySelectorAll(".admin-only").forEach(el => {
-    el.style.display = role === "admin" ? "" : "none";
-  });
-  const audit = document.getElementById("tab-audit");
-  if (audit) audit.style.display = role === "admin" ? "" : "none";
+  const auditBtn = document.getElementById("tab-audit");
+  if (auditBtn) auditBtn.style.display = (role === "admin") ? "" : "none";
 }
 
-/* =========================
-   NAVIGATION
-========================= */
 function bindTabs() {
   document.querySelectorAll(".nav-item").forEach(btn => {
-    btn.onclick = () => {
+    btn.addEventListener("click", () => {
       document.querySelectorAll(".nav-item").forEach(b => b.classList.remove("active"));
       btn.classList.add("active");
 
@@ -62,55 +45,29 @@ function bindTabs() {
       document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
       document.getElementById(`tab-${tab}`)?.classList.add("active");
 
-      const titles = {
-        dashboard: "Dashboard",
-        analytics: "Analytics",
-        calendar: "Calendar",
-        projects: "Projects",
-        kanban: "Kanban",
-        workload: "Workload",
-        comms: "Branding & Communication",
-        audit: "Audit Trail",
-        data: "Data Export"
-      };
-      UI.setPage(titles[tab] || "", "");
-    };
+      if (tab === "dashboard") UI.setPage("Dashboard", "Overview");
+      if (tab === "projects") UI.setPage("Projects", "Create and manage projects");
+      if (tab === "audit") UI.setPage("Audit Trail", "Admin only");
+    });
   });
 }
 
-/* =========================
-   DATA LOAD
-========================= */
 async function refreshAll() {
   state.projects = await Store.listProjects();
   state.tasks = await Store.listAllTasks();
-  state.comms = await Store.listCommunications();
-  state.leaves = await Store.listLeaves();
 
   renderDashboard();
   renderProjects();
-  renderAnalytics();
-  renderKanban();
-  renderWorkload();
-  renderComms();
-  renderCalendar();
-
-  if (Store.getRole() === "admin") {
-    renderAudit();
-  }
+  renderProjectDetails();
+  if (Store.getRole() === "admin") await renderAudit();
 }
 
-/* =========================
-   DASHBOARD
-========================= */
 function renderDashboard() {
-  const active = state.projects.filter(p => p.status !== "Completed");
+  const active = state.projects.filter(p => (p.status || "") !== "Completed");
+  const overdue = state.tasks.filter(t => (t.status || "").toLowerCase() !== "completed" && isOverdue(t.deadline));
+  const dueWeek = state.tasks.filter(t => (t.status || "").toLowerCase() !== "completed" && isDueWithinDays(t.deadline, 7));
+
   document.getElementById("kpiActiveProjects").textContent = active.length;
-  document.getElementById("kpiActiveProjectsSub").textContent = `Total: ${state.projects.length}`;
-
-  const overdue = state.tasks.filter(t => t.status !== "Completed" && isOverdue(t.deadline));
-  const dueWeek = state.tasks.filter(t => t.status !== "Completed" && isDueWithinDays(t.deadline, 7));
-
   document.getElementById("kpiOverdueTasks").textContent = overdue.length;
   document.getElementById("kpiDueWeek").textContent = dueWeek.length;
 
@@ -119,173 +76,188 @@ function renderDashboard() {
       <div class="item">
         <div>
           <div class="item-title">${UI.esc(p.name)}</div>
-          <div class="item-sub">${p.owner || "—"}</div>
+          <div class="item-sub">Owner: ${UI.esc(p.owner || "—")} • Status: ${UI.esc(p.status || "—")}</div>
         </div>
         <div class="item-meta"><strong>${completionRateForProject(p.id)}%</strong></div>
       </div>
-    `).join("") || `<div class="hint">No active projects</div>`;
+    `).join("") || `<div class="hint">No active projects.</div>`;
 }
 
-/* =========================
-   PROJECTS
-========================= */
 function renderProjects() {
   const list = document.getElementById("projectList");
-  if (!list) return;
+  const q = (document.getElementById("projectSearch").value || "").toLowerCase().trim();
+  const filtered = state.projects.filter(p => !q || (p.name || "").toLowerCase().includes(q));
 
-  list.innerHTML = state.projects.map(p => `
-    <div class="item" data-id="${p.id}">
+  list.innerHTML = filtered.map(p => `
+    <div class="item" data-pid="${p.id}" style="cursor:pointer">
       <div>
         <div class="item-title">${UI.esc(p.name)}</div>
-        <div class="item-sub">${UI.esc(p.owner || "")} • ${p.status}</div>
+        <div class="item-sub">Owner: ${UI.esc(p.owner || "—")} • Status: ${UI.esc(p.status || "—")}</div>
       </div>
+      <div class="item-meta">${UI.esc(p.launchDate || "")}</div>
     </div>
-  `).join("") || `<div class="hint">No projects</div>`;
+  `).join("") || `<div class="hint">No projects yet.</div>`;
 
   list.querySelectorAll(".item").forEach(el => {
-    el.onclick = () => {
-      state.selectedProjectId = el.dataset.id;
+    el.addEventListener("click", () => {
+      state.selectedProjectId = el.getAttribute("data-pid");
       renderProjectDetails();
-    };
+    });
   });
 }
 
 function renderProjectDetails() {
   const pid = state.selectedProjectId;
   const p = state.projects.find(x => x.id === pid);
-  if (!p) return;
 
-  document.getElementById("projectDetailsTitle").textContent = p.name;
-  document.getElementById("addTaskBtn").disabled = false;
+  const title = document.getElementById("projectDetailsTitle");
+  const meta = document.getElementById("projectDetailsMeta");
+  const addTaskBtn = document.getElementById("addTaskBtn");
 
-  const tbody = document.querySelector("#taskTable tbody");
+  if (!p) {
+    title.textContent = "Select a project";
+    meta.textContent = "Pick a project to see tasks.";
+    addTaskBtn.disabled = true;
+    document.querySelector("#taskTable tbody").innerHTML = "";
+    return;
+  }
+
+  title.textContent = p.name;
+  meta.textContent = `Owner: ${p.owner || "—"} • Budget: AED ${Number(p.budgetAed || 0).toLocaleString()} • Status: ${p.status || "—"}`;
+  addTaskBtn.disabled = false;
+
   const tasks = state.tasks.filter(t => t.projectId === pid);
-
-  tbody.innerHTML = tasks.map(t => `
+  document.querySelector("#taskTable tbody").innerHTML = tasks.map(t => `
     <tr>
-      <td>${UI.esc(t.name)}</td>
-      <td>${t.status}</td>
-      <td>${t.priority}</td>
-      <td>${UI.esc(t.owner)}</td>
-      <td>${t.deadline || ""}</td>
+      <td><strong>${UI.esc(t.name)}</strong></td>
+      <td>${UI.esc(t.status || "")}</td>
+      <td>${UI.esc(t.priority || "")}</td>
+      <td>${UI.esc(t.owner || "")}</td>
+      <td style="${isOverdue(t.deadline) && (t.status||"").toLowerCase()!=="completed" ? "color:var(--danger);font-weight:900" : ""}">
+        ${UI.esc(t.deadline || "")}
+      </td>
     </tr>
-  `).join("") || `<tr><td colspan="5">No tasks</td></tr>`;
+  `).join("") || `<tr><td colspan="5"><div class="hint">No tasks for this project yet.</div></td></tr>`;
 }
 
-/* =========================
-   ANALYTICS / KANBAN / ETC
-========================= */
-function renderAnalytics() {
-  Analytics.buildOverall(state.projects, document.getElementById("overallMetric").value);
-  Analytics.renderFinanceTable(state.projects);
-}
+/* ---------- SIMPLE FORMS (prompt-based for now) ---------- */
+async function createProjectPrompt() {
+  const name = prompt("Project name?");
+  if (!name) return;
 
-function renderKanban() {
-  Kanban.render(state.projects, async (id, status) => {
-    const before = state.projects.find(p => p.id === id);
-    await Store.updateProject(id, { status }, before);
-    refreshAll();
+  const owner = prompt("Owner (CSR name)?") || "";
+  const budgetAed = Number(prompt("Budget AED? (number)") || "0");
+
+  await Store.createProject({
+    name,
+    owner,
+    budgetAed,
+    priority: "Medium",
+    status: "Pending",
+    targetedBeneficiaries: 0,
+    launchDate: "",
   });
+
+  await refreshAll();
 }
 
-function renderWorkload() {
-  const box = document.getElementById("memberWorkloadList");
-  if (!box) return;
+async function createTaskPrompt() {
+  const pid = state.selectedProjectId;
+  if (!pid) return;
 
-  const members = Store.getMembers();
-  box.innerHTML = members.map(m => {
-    const count = state.projects.filter(p => p.owner === m.name).length;
-    return `
-      <div class="item">
-        <div class="item-title">${m.name}</div>
-        <div class="item-meta">${count}</div>
-      </div>
-    `;
-  }).join("");
-}
+  const name = prompt("Task name?");
+  if (!name) return;
 
-function renderComms() {
-  const list = document.getElementById("commList");
-  if (!list) return;
+  const owner = prompt("Task owner?") || "";
+  const deadline = prompt("Deadline (YYYY-MM-DD) optional") || "";
 
-  list.innerHTML = state.comms.map(c => `
-    <div class="item">
-      <div>
-        <div class="item-title">${UI.esc(c.subject)}</div>
-        <div class="item-sub">${c.status}</div>
-      </div>
-    </div>
-  `).join("") || `<div class="hint">No communications</div>`;
-}
+  await Store.createTask({
+    projectId: pid,
+    name,
+    owner,
+    deadline,
+    status: "Pending",
+    priority: "Medium"
+  });
 
-function renderCalendar() {
-  Cal.render(state.projects, state.leaves);
+  await refreshAll();
 }
 
 async function renderAudit() {
   const tbody = document.querySelector("#auditTable tbody");
-  if (!tbody) return;
-
-  const logs = await Store.listAudit();
-  tbody.innerHTML = logs.map(l => `
-    <tr>
-      <td>${new Date(l.at).toLocaleString()}</td>
-      <td>${l.byEmail}</td>
-      <td>${l.type}</td>
-      <td>${l.title}</td>
-      <td>${l.action}</td>
-    </tr>
-  `).join("");
+  tbody.innerHTML = `<tr><td colspan="5"><div class="hint">Loading...</div></td></tr>`;
+  try {
+    const logs = await Store.listAudit();
+    tbody.innerHTML = logs.map(l => `
+      <tr>
+        <td>${new Date(l.at).toLocaleString()}</td>
+        <td>${UI.esc(l.byEmail || "")}</td>
+        <td>${UI.esc(l.type || "")}</td>
+        <td>${UI.esc(l.title || "")}</td>
+        <td>${UI.esc(l.action || "")}</td>
+      </tr>
+    `).join("") || `<tr><td colspan="5"><div class="hint">No logs yet.</div></td></tr>`;
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5"><div class="error">${UI.esc(e.message)}</div></td></tr>`;
+  }
 }
 
-/* =========================
-   INIT + AUTH
-========================= */
+/* ---------- AUTH + BOOT ---------- */
 function init() {
   bindTabs();
 
-  document.getElementById("loginBtn").onclick = async () => {
-    const email = loginEmail.value.trim();
-    const password = loginPassword.value;
-    authError.hidden = true;
+  document.getElementById("projectSearch").addEventListener("input", renderProjects);
+  document.getElementById("newProjectBtn").addEventListener("click", createProjectPrompt);
+  document.getElementById("addTaskBtn").addEventListener("click", createTaskPrompt);
+  document.getElementById("logoutBtn").addEventListener("click", () => auth.signOut());
+
+  document.getElementById("loginBtn").addEventListener("click", async () => {
+    const email = document.getElementById("loginEmail").value.trim();
+    const password = document.getElementById("loginPassword").value;
+    const err = document.getElementById("authError");
+    err.hidden = true;
+
     try {
       await auth.signInWithEmailAndPassword(email, password);
     } catch (e) {
-      authError.hidden = false;
-      authError.textContent = e.message;
+      err.hidden = false;
+      err.textContent = e.message;
     }
-  };
+  });
 
-  document.getElementById("registerBtn").onclick = async () => {
-    const email = loginEmail.value.trim();
-    const password = loginPassword.value;
-    authError.hidden = true;
+  document.getElementById("registerBtn").addEventListener("click", async () => {
+    const email = document.getElementById("loginEmail").value.trim();
+    const password = document.getElementById("loginPassword").value;
+    const err = document.getElementById("authError");
+    err.hidden = true;
+
     try {
       await auth.createUserWithEmailAndPassword(email, password);
       const u = auth.currentUser;
       await db.collection(COL.roles).doc(u.uid).set({ role: "csr" }, { merge: true });
     } catch (e) {
-      authError.hidden = false;
-      authError.textContent = e.message;
+      err.hidden = false;
+      err.textContent = e.message;
     }
-  };
+  });
 
-  document.getElementById("signOutBtn").onclick = () => auth.signOut();
-
-  auth.onAuthStateChanged(async user => {
-    const authGate = document.getElementById("authGate");
-    const tabs = document.getElementById("tabs");
+  auth.onAuthStateChanged(async (user) => {
+    const authWrap = document.getElementById("authWrap");
+    const appWrap = document.getElementById("appWrap");
+    const who = document.getElementById("whoami");
 
     if (!user) {
-      authGate.hidden = false;
-      tabs.hidden = true;
+      authWrap.hidden = false;
+      appWrap.hidden = true;
+      who.textContent = "—";
       return;
     }
 
-    authGate.hidden = true;
-    tabs.hidden = false;
+    authWrap.hidden = true;
+    appWrap.hidden = false;
+    who.textContent = await Store.whoAmI();
 
-    const role = await Store.loadRole(user.uid);
+    const role = await Store.ensureRole(user);
     setAdminVisibility(role);
 
     await refreshAll();
