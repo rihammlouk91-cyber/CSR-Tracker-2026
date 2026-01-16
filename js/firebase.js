@@ -1,4 +1,4 @@
-// 1) Create Firebase project (web app) then paste config here
+// Paste your Firebase web app config here:
 const firebaseConfig = {
   apiKey: "AIzaSyC7jul8cNDMTu6w6wjKtHxFDy45h-q6ub8",
   authDomain: "csr-tracker-2026.firebaseapp.com",
@@ -9,32 +9,17 @@ const firebaseConfig = {
   measurementId: "G-N8YVNRW59L"
 };
 
+// Init
 firebase.initializeApp(firebaseConfig);
 
-const auth = firebase.auth();
-const db = firebase.firestore();
+// Expose commonly used handles
+window.auth = firebase.auth();
+window.db = firebase.firestore();
 
-// Collections
-const COL = {
-  roles: "roles",
-  members: "members",
+// Collection names
+window.COL = {
   projects: "projects",
   tasks: "tasks",
-  communications: "communications",
-  leaves: "leaves",
-  audit: "audit_logs",
+  roles: "roles",
+  audit: "audit",
 };
-
-// Helpers
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function toDateOnlyISO(d) {
-  const x = new Date(d);
-  const yyyy = x.getFullYear();
-  const mm = String(x.getMonth() + 1).padStart(2, "0");
-  const dd = String(x.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
