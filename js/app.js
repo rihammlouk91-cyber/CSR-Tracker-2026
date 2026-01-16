@@ -711,3 +711,26 @@ function init() {
   };
 
   document.getEl
+
+  // run auth state listener so UI switches after login/register
+  auth.onAuthStateChanged(async (user) => {
+    const authWrap = document.getElementById("authWrap");
+    const appWrap = document.getElementById("appWrap");
+
+    if (!user) {
+      authWrap.hidden = false;
+      appWrap.hidden = true;
+      return;
+    }
+
+    authWrap.hidden = true;
+    appWrap.hidden = false;
+
+    const role = await Store.ensureRole(user);
+    setAdminVisibility(role);
+
+    await refreshAll();
+  });
+}
+
+init();
