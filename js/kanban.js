@@ -1,42 +1,64 @@
-const Kanban = (() => {
-  function render(projects, onMove) {
-    const cols = document.querySelectorAll(".kanban-drop");
-    cols.forEach(c => c.innerHTML = "");
+(function(){
+  const STATUSES = ["Pending", "Ongoing", "On Hold", "Completed"];
 
-    for (const p of projects) {
-      const card = document.createElement("div");
-      card.className = "kanban-card";
-      card.draggable = true;
-      card.dataset.id = p.id;
-      card.dataset.title = p.name;
-      card.innerHTML = `
-        <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
-          <div>
-            <div style="font-weight:900">${UI.esc(p.name)}</div>
-            <div style="color:#64748b;font-size:12px;margin-top:4px;">Owner: ${UI.esc(p.owner || "—")}</div>
-          </div>
-          ${UI.badgePriority(p.priority)}
+  function render(projects, onMove){
+    const root = document.getElementById("kanbanRoot");
+    if (!root) return;
+
+    root.innerHTML = STATUSES.map(st => `
+      <div class="kcol">
+        <h4>${UI.esc(st)}</h4>
+        <div class="kdrop" data-status="${UI.esc(st)}"></div>
+      </div>
+    `).join("");
+
+    const byStatus = {};
+    STATUSES.forEach(s => byStatus[s] = []);
+    projects.forEach(p => {
+      const s = p.status || "Pending";
+      if (!byStatus[s]) byStatus[s] = [];
+      byStatus[s].push(p);
+    });
+
+    root.querySelectorAll(".kdrop").forEach(drop => {
+      const st = drop.getAttribute("data-status");
+      const items = (byStatus[st] || []);
+
+      drop.innerHTML = items.map(p => `
+        <div class="kcard" draggable="true" data-id="${UI.esc(p.id)}">
+          <div class="t">${UI.esc(p.name)} ${UI.badgePriority(p.priority)}</div>
+          <div class="s">Owner: ${UI.esc(p.owner || "—")}</div>
         </div>
-      `;
+      `).join("") || `<div class="hint">No projects</div>`;
+    });
 
+    // Drag & drop
+    let draggedId = null;
+
+    root.querySelectorAll(".kcard").forEach(card => {
       card.addEventListener("dragstart", (e) => {
-        e.dataTransfer.setData("text/plain", p.id);
+        draggedId = card.getAttribute("data-id");
+        e.dataTransfer.setData("text/plain", draggedId);
       });
+    });
 
-      const drop = document.querySelector(`.kanban-drop[data-drop="${p.status || "Pending"}"]`);
-      if (drop) drop.appendChild(card);
-    }
-
-    document.querySelectorAll(".kanban-drop").forEach(drop => {
-      drop.addEventListener("dragover", (e) => e.preventDefault());
+    root.querySelectorAll(".kdrop").forEach(drop => {
+      drop.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        drop.classList.add("over");
+      });
+      drop.addEventListener("dragleave", () => drop.classList.remove("over"));
       drop.addEventListener("drop", async (e) => {
         e.preventDefault();
-        const id = e.dataTransfer.getData("text/plain");
-        const newStatus = drop.dataset.drop;
-        await onMove(id, newStatus);
+        drop.classList.remove("over");
+        const id = e.dataTransfer.getData("text/plain") || draggedId;
+        const newStatus = drop.getAttribute("data-status");
+        if (id && newStatus && typeof onMove === "function"){
+          await onMove(id, newStatus);
+        }
       });
     });
   }
 
-  return { render };
+  window.Kanban = { render };
 })();
