@@ -1,4 +1,3 @@
-// Paste your Firebase web app config here:
 const firebaseConfig = {
   apiKey: "AIzaSyC7jul8cNDMTu6w6wjKtHxFDy45h-q6ub8",
   authDomain: "csr-tracker-2026.firebaseapp.com",
@@ -9,17 +8,18 @@ const firebaseConfig = {
   measurementId: "G-N8YVNRW59L"
 };
 
-// Init
+
 firebase.initializeApp(firebaseConfig);
 
-// Expose commonly used handles
 window.auth = firebase.auth();
 window.db = firebase.firestore();
 
-// Collection names
 window.COL = {
   projects: "projects",
   tasks: "tasks",
+  communications: "communications",
+  leaves: "leaves",
+  members: "members",
   roles: "roles",
   audit: "audit",
 };
