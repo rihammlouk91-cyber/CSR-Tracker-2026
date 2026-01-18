@@ -1,94 +1,130 @@
-const Analytics = (() => {
+(function(){
   let overallChart = null;
   let projectChart = null;
 
-  function destroy(c) { if (c) c.destroy(); }
-
-  function buildOverall(projects, metric) {
-    const labels = projects.map(p => p.name);
-    let data = [];
-    let dsLabel = "";
-
-    if (metric === "volunteers") {
-      dsLabel = "Total Volunteers (Int+Ext actual)";
-      data = projects.map(p => (p.volunteersInternalActual || 0) + (p.volunteersExternalActual || 0));
-    } else if (metric === "beneficiaries") {
-      dsLabel = "Actual Beneficiaries";
-      data = projects.map(p => (p.actualBeneficiaries || 0));
-    } else {
-      dsLabel = "Utilized AED";
-      data = projects.map(p => (p.utilizedAed || 0));
-    }
-
-    const ctx = document.getElementById("overallChart");
-    destroy(overallChart);
-    overallChart = new Chart(ctx, {
-      type: "bar",
-      data: { labels, datasets: [{ label: dsLabel, data }] },
-      options: { responsive: true, maintainAspectRatio: false }
-    });
+  function destroyIf(chart){
+    if (chart && typeof chart.destroy === "function") chart.destroy();
   }
 
-  function buildPerProject(p, metric) {
-    const ctx = document.getElementById("projectChart");
-    destroy(projectChart);
+  function sumProjects(projects, key){
+    return projects.reduce((acc,p)=> acc + (Number(p[key] || 0) || 0), 0);
+  }
 
-    if (!p) return;
+  function ensureCanvas(id){
+    const el = document.getElementById(id);
+    if (!el) throw new Error(`Missing canvas #${id}`);
+    return el.getContext("2d");
+  }
 
-    if (metric === "volunteers") {
-      projectChart = new Chart(ctx, {
-        type: "doughnut",
-        data: {
-          labels: ["Internal", "External"],
-          datasets: [{ data: [p.volunteersInternalActual || 0, p.volunteersExternalActual || 0] }]
-        },
-        options: { responsive: true, maintainAspectRatio: false }
-      });
-      return;
-    }
-
-    if (metric === "beneficiaries") {
-      projectChart = new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels: ["Target", "Actual"],
-          datasets: [{ label: "Beneficiaries", data: [p.targetedBeneficiaries || 0, p.actualBeneficiaries || 0] }]
-        },
-        options: { responsive: true, maintainAspectRatio: false }
-      });
-      return;
-    }
-
-    projectChart = new Chart(ctx, {
+  function chartBar(ctx, labels, data, title){
+    return new Chart(ctx, {
       type: "bar",
       data: {
-        labels: ["Budget", "Utilized"],
-        datasets: [{ label: "AED", data: [p.budgetAed || 0, p.utilizedAed || 0] }]
+        labels,
+        datasets: [{
+          label: title,
+          data
+        }]
       },
-      options: { responsive: true, maintainAspectRatio: false }
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true } }
+      }
     });
   }
 
-  function renderFinanceTable(projects) {
-    const tbody = document.querySelector("#financeTable tbody");
-    tbody.innerHTML = projects.map(p => {
-      const budget = Number(p.budgetAed || 0);
-      const utilized = Number(p.utilizedAed || 0);
-      const utilPct = budget > 0 ? Math.round((utilized / budget) * 100) : 0;
-      const volInt = p.volunteersInternalActual || 0;
-      const volExt = p.volunteersExternalActual || 0;
+  function buildOverall(projects, metric){
+    destroyIf(overallChart);
+
+    const ctx = ensureCanvas("chartOverall");
+    if (metric === "volunteers"){
+      const internal = sumProjects(projects, "volIntTarget");
+      const external = sumProjects(projects, "volExtTarget");
+      overallChart = chartBar(ctx, ["Internal", "External"], [internal, external], "Volunteers");
+      return;
+    }
+
+    if (metric === "beneficiaries"){
+      const target = sumProjects(projects, "targetedBeneficiaries");
+      const achieved = sumProjects(projects, "achievedBeneficiaries");
+      overallChart = chartBar(ctx, ["Target", "Achieved"], [target, achieved], "Beneficiaries");
+      return;
+    }
+
+    if (metric === "budget"){
+      const budget = sumProjects(projects, "budgetAed");
+      const utilized = sumProjects(projects, "utilizedAed");
+      overallChart = chartBar(ctx, ["Budgeted", "Utilized"], [budget, utilized], "Budget (AED)");
+      return;
+    }
+  }
+
+  function buildPerProject(project, metric){
+    destroyIf(projectChart);
+
+    const ctx = ensureCanvas("chartProject");
+    if (!project){
+      projectChart = chartBar(ctx, ["—"], [0], "No project selected");
+      return;
+    }
+
+    if (metric === "volunteers"){
+      const internal = Number(project.volIntTarget || 0) || 0;
+      const external = Number(project.volExtTarget || 0) || 0;
+      projectChart = chartBar(ctx, ["Internal", "External"], [internal, external], "Volunteers");
+      return;
+    }
+
+    if (metric === "beneficiaries"){
+      const target = Number(project.targetedBeneficiaries || 0) || 0;
+      const achieved = Number(project.achievedBeneficiaries || 0) || 0;
+      projectChart = chartBar(ctx, ["Target", "Achieved"], [target, achieved], "Beneficiaries");
+      return;
+    }
+
+    if (metric === "budget"){
+      const budget = Number(project.budgetAed || 0) || 0;
+      const utilized = Number(project.utilizedAed || 0) || 0;
+      projectChart = chartBar(ctx, ["Budgeted", "Utilized"], [budget, utilized], "Budget (AED)");
+      return;
+    }
+  }
+
+  function renderFinanceTable(projects){
+    const wrap = document.getElementById("financeTableWrap");
+    if (!wrap) return;
+
+    const rows = projects.map(p => {
+      const budget = Number(p.budgetAed || 0) || 0;
+      const utilized = Number(p.utilizedAed || 0) || 0;
+      const pct = budget > 0 ? Math.round((utilized / budget) * 100) : 0;
       return `
         <tr>
-          <td><strong>${UI.esc(p.name)}</strong></td>
-          <td>${budget.toLocaleString()}</td>
-          <td>${utilized.toLocaleString()}</td>
-          <td>${utilPct}%</td>
-          <td>${(p.targetedBeneficiaries || 0)} / ${(p.actualBeneficiaries || 0)}</td>
-          <td>${volInt} / ${volExt}</td>
+          <td><strong>${UI.esc(p.name || "")}</strong></td>
+          <td>AED ${budget.toLocaleString()}</td>
+          <td>AED ${utilized.toLocaleString()}</td>
+          <td><strong>${pct}%</strong></td>
         </tr>
       `;
     }).join("");
+
+    wrap.innerHTML = `
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Project</th>
+            <th>Budgeted</th>
+            <th>Utilized</th>
+            <th>Utilization</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows || `<tr><td colspan="4"><div class="hint">No projects yet.</div></td></tr>`}
+        </tbody>
+      </table>
+    `;
   }
 
-  return { buildOverall, buildPerProject, renderFinanceTable };
+  window.Analytics = { buildOverall, buildPerProject, renderFinanceTable };
 })();
