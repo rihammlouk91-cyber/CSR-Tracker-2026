@@ -1,52 +1,78 @@
-const Cal = (() => {
-  let cal = null;
+(function(){
+  let calendar = null;
 
-  async function render(projects, leaves) {
-    const el = document.getElementById("calendar");
-    el.innerHTML = "";
+  function colorProject(){ return "#3b82f6"; }   // blue
+  function colorLeave(){ return "#f59e0b"; }     // amber
 
-    const projectEvents = projects.map((p, idx) => {
-      const start = p.startDate || p.launchDate;
-      const end = p.endDate || p.startDate || p.launchDate;
-      if (!start) return null;
-      return {
-        title: `Project: ${p.name}`,
-        start,
-        end: end ? addOneDay(end) : start,
-        allDay: true,
-        color: pickColor(idx),
-      };
-    }).filter(Boolean);
+  function toEventProject(p){
+    const start = p.startDate || p.launchDate || "";
+    const end = p.endDate || "";
+    if (!start) return null;
 
-    const leaveEvents = leaves.map(l => ({
-      title: `Leave: ${l.member}`,
-      start: l.startDate,
-      end: addOneDay(l.endDate),
+    return {
+      title: `Project: ${p.name || ""}`,
+      start,
+      end: end || undefined,
       allDay: true,
-      color: "#f59e0b"
-    }));
+      backgroundColor: colorProject(),
+      borderColor: colorProject(),
+      textColor: "#ffffff"
+    };
+  }
 
-    cal = new FullCalendar.Calendar(el, {
-      initialView: "dayGridMonth",
-      height: "auto",
-      events: [...projectEvents, ...leaveEvents],
+  function toEventLeave(l){
+    if (!l.startDate) return null;
+    return {
+      title: `Leave: ${l.member || ""}`,
+      start: l.startDate,
+      end: l.endDate ? addOneDay(l.endDate) : undefined,
+      allDay: true,
+      backgroundColor: colorLeave(),
+      borderColor: colorLeave(),
+      textColor: "#111827"
+    };
+  }
+
+  function addOneDay(yyyyMmDd){
+    const d = new Date(yyyyMmDd);
+    d.setDate(d.getDate() + 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth()+1).padStart(2,"0");
+    const day = String(d.getDate()).padStart(2,"0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function render(projects, leaves){
+    const root = document.getElementById("calendarRoot");
+    if (!root) return;
+
+    const events = [];
+    projects.forEach(p => {
+      const ev = toEventProject(p);
+      if (ev) events.push(ev);
+    });
+    leaves.forEach(l => {
+      const ev = toEventLeave(l);
+      if (ev) events.push(ev);
     });
 
-    cal.render();
+    if (calendar){
+      calendar.removeAllEvents();
+      events.forEach(e => calendar.addEvent(e));
+      calendar.render();
+      return;
+    }
+
+    calendar = new FullCalendar.Calendar(root, {
+      initialView: "dayGridMonth",
+      height: "auto",
+      events,
+      eventDisplay: "block",
+      nowIndicator: true,
+      firstDay: 1
+    });
+    calendar.render();
   }
 
-  function addOneDay(dateStr) {
-    const d = new Date(dateStr);
-    d.setDate(d.getDate() + 1);
-    return toDateOnlyISO(d);
-  }
-
-  function pickColor(i) {
-    // not specifying exact palette per your preference? you asked light friendly colors.
-    // Keeping a subtle deterministic set.
-    const colors = ["#2563eb", "#16a34a", "#7c3aed", "#0891b2", "#e11d48", "#334155"];
-    return colors[i % colors.length];
-  }
-
-  return { render };
+  window.Cal = { render };
 })();
