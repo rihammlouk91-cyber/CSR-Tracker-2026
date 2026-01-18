@@ -1,274 +1,236 @@
-const Store = (() => {
-  let currentUser = null;
-  let currentRole = "csr"; // default
-  let membersCache = [];
+(function(){
+  let _role = "csr";
+  let _membersCache = null;
 
-  async function loadRole(uid) {
-    const snap = await db.collection(COL.roles).doc(uid).get();
-    currentRole = snap.exists ? (snap.data().role || "csr") : "csr";
-    return currentRole;
-  }
+  function nowIso(){ return new Date().toISOString(); }
+  function num(x){ const n = Number(x); return Number.isFinite(n) ? n : 0; }
 
-  async function loadMembers() {
-    const snap = await db.collection(COL.members).orderBy("name").get();
-    membersCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    return membersCache;
-  }
-
-  function getMembers() { return membersCache; }
-  function getRole() { return currentRole; }
-  function getUser() { return currentUser; }
-
-  function watchAuth(cb) {
-    auth.onAuthStateChanged(async (u) => {
-      currentUser = u || null;
-      if (u) {
-        await loadRole(u.uid);
-        await loadMembers();
-      }
-      cb(u);
-    });
-  }
-
-  // --- AUDIT ---
-  async function logAudit({ type, title, action, entityId, changes }) {
-    // CSR should not even see audit, but logs can be written by CSR too.
-    // Only admin can read audit (rules enforce).
-    const u = getUser();
-    if (!u) return;
-
-    const payload = {
-      at: nowIso(),
-      byUid: u.uid,
-      byEmail: u.email || "",
-      type,       // "project" | "task" | "communication" | "leave"
-      title,      // headline
-      action,     // "create" | "update" | "delete"
-      entityId,
-      changes: changes || null, // { field: {from,to}, ... }
-    };
-    await db.collection(COL.audit).add(payload);
-  }
-
-  // Utility: compute diffs
-  function diffObjects(before, after, fields) {
-    const out = {};
-    for (const f of fields) {
-      const b = before?.[f] ?? null;
-      const a = after?.[f] ?? null;
-      if (JSON.stringify(b) !== JSON.stringify(a)) out[f] = { from: b, to: a };
+  async function ensureRole(user){
+    const ref = db.collection(COL.roles).doc(user.uid);
+    const snap = await ref.get();
+    if (!snap.exists){
+      await ref.set({ role: "csr", createdAt: nowIso() }, { merge: true });
+      _role = "csr";
+      return _role;
     }
-    return Object.keys(out).length ? out : null;
+    _role = (snap.data().role || "csr");
+    return _role;
   }
 
-  // --- PROJECTS ---
-  async function createProject(p) {
-    const u = getUser();
-    const doc = {
-      name: p.name.trim(),
-      priority: p.priority,
-      budgetAed: Number(p.budgetAed || 0),
-      utilizedAed: 0,
-      targetedBeneficiaries: Number(p.targetedBeneficiaries || 0),
-      actualBeneficiaries: 0,
-      owner: p.owner,
-      launchDate: p.launchDate,
-      startDate: p.startDate || p.launchDate,
-      endDate: p.endDate || "",
-      status: p.status || "Pending",
-      createdAt: nowIso(),
-      createdBy: u?.email || "",
-      updatedAt: nowIso(),
-      updatedBy: u?.email || "",
-      volunteersInternalTarget: Number(p.volIntTarget || 0),
-      volunteersExternalTarget: Number(p.volExtTarget || 0),
-      volunteersInternalActual: 0,
-      volunteersExternalActual: 0,
-    };
-    const ref = await db.collection(COL.projects).add(doc);
-    await logAudit({ type: "project", title: doc.name, action: "create", entityId: ref.id });
-    return ref.id;
+  async function loadRole(uid){
+    const snap = await db.collection(COL.roles).doc(uid).get();
+    _role = snap.exists ? (snap.data().role || "csr") : "csr";
+    return _role;
   }
 
-  async function updateProject(id, patch, beforeDoc) {
-    const u = getUser();
-    patch.updatedAt = nowIso();
-    patch.updatedBy = u?.email || "";
-    await db.collection(COL.projects).doc(id).update(patch);
+  function getRole(){ return _role; }
 
-    const fields = Object.keys(patch).filter(k => !["updatedAt","updatedBy"].includes(k));
-    const changes = diffObjects(beforeDoc, { ...beforeDoc, ...patch }, fields);
-    await logAudit({
-      type: "project",
-      title: (beforeDoc?.name || "Project"),
-      action: "update",
-      entityId: id,
-      changes
+  async function whoAmI(){
+    const u = auth.currentUser;
+    return u ? (u.email || u.uid) : "—";
+  }
+
+  async function listMembers(force=false){
+    if (!force && _membersCache) return _membersCache;
+    const snap = await db.collection(COL.members).orderBy("name").get().catch(() => null);
+    const items = snap ? snap.docs.map(d => ({ id:d.id, ...d.data() })) : [];
+    _membersCache = items;
+    return items;
+  }
+
+  async function logAudit({ type, title, action, changes }){
+    const u = auth.currentUser;
+    await db.collection(COL.audit).add({
+      at: Date.now(),
+      atIso: nowIso(),
+      byUid: u ? u.uid : "anon",
+      byEmail: u ? (u.email || "") : "",
+      type,
+      title,
+      action,
+      changes: changes || null
     });
   }
 
-  async function listProjects() {
-    const snap = await db.collection(COL.projects).orderBy("createdAt", "desc").get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  // -------- Projects --------
+  async function listProjects(){
+    const snap = await db.collection(COL.projects).orderBy("createdAt","desc").get();
+    return snap.docs.map(d => ({ id:d.id, ...d.data() }));
   }
 
-  // --- TASKS ---
-  async function createTask(t) {
-    const u = getUser();
-    const doc = {
-      projectId: t.projectId,
-      name: t.name.trim(),
-      description: t.description || "",
-      status: t.status || "Pending",
-      priority: t.priority,
-      owner: t.owner,
-      supportTeam: t.supportTeam || "",
-      deadline: t.deadline || "",
-      targetedInternalVolunteers: Number(t.targetedInternalVolunteers || 0),
-      targetedExternalVolunteers: Number(t.targetedExternalVolunteers || 0),
-      nextSteps: t.nextSteps || "",
-      notes: t.notes || "",
-      createdAt: nowIso(),
-      createdBy: u?.email || "",
-      updatedAt: nowIso(),
-      updatedBy: u?.email || "",
+  async function createProject(data){
+    const payload = {
+      name: (data.name || "").trim(),
+      priority: data.priority || "Medium",
+      status: data.status || "Pending",
+      owner: (data.owner || "").trim(),
+
+      budgetAed: num(data.budgetAed),
+      utilizedAed: num(data.utilizedAed),
+      targetedBeneficiaries: num(data.targetedBeneficiaries),
+      achievedBeneficiaries: num(data.achievedBeneficiaries),
+
+      volIntTarget: num(data.volIntTarget),
+      volExtTarget: num(data.volExtTarget),
+
+      startDate: data.startDate || data.launchDate || "",
+      launchDate: data.launchDate || "",
+      endDate: data.endDate || "",
+
+      createdAt: Date.now(),
+      createdAtIso: nowIso(),
     };
-    const ref = await db.collection(COL.tasks).add(doc);
-    await logAudit({ type: "task", title: doc.name, action: "create", entityId: ref.id });
+
+    const ref = await db.collection(COL.projects).add(payload);
+    await logAudit({ type:"project", title: payload.name, action:"created", changes: payload });
     return ref.id;
   }
 
-  async function updateTask(id, patch, beforeDoc) {
-    const u = getUser();
-    patch.updatedAt = nowIso();
-    patch.updatedBy = u?.email || "";
-    await db.collection(COL.tasks).doc(id).update(patch);
+  async function updateProject(id, patch, before){
+    const clean = { ...patch };
+    if ("budgetAed" in clean) clean.budgetAed = num(clean.budgetAed);
+    if ("utilizedAed" in clean) clean.utilizedAed = num(clean.utilizedAed);
+    if ("targetedBeneficiaries" in clean) clean.targetedBeneficiaries = num(clean.targetedBeneficiaries);
+    if ("achievedBeneficiaries" in clean) clean.achievedBeneficiaries = num(clean.achievedBeneficiaries);
+    if ("volIntTarget" in clean) clean.volIntTarget = num(clean.volIntTarget);
+    if ("volExtTarget" in clean) clean.volExtTarget = num(clean.volExtTarget);
 
-    const fields = Object.keys(patch).filter(k => !["updatedAt","updatedBy"].includes(k));
-    const changes = diffObjects(beforeDoc, { ...beforeDoc, ...patch }, fields);
-    await logAudit({ type: "task", title: beforeDoc?.name || "Task", action: "update", entityId: id, changes });
+    await db.collection(COL.projects).doc(id).set(clean, { merge:true });
+    await logAudit({
+      type:"project",
+      title: before?.name || id,
+      action:"updated",
+      changes:{ before: before || null, after: clean }
+    });
   }
 
-  async function listTasksByProject(projectId) {
-    const snap = await db.collection(COL.tasks)
-      .where("projectId", "==", projectId)
-      .orderBy("deadline", "asc")
-      .get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  // -------- Tasks --------
+  async function listAllTasks(){
+    const snap = await db.collection(COL.tasks).orderBy("createdAt","desc").get();
+    return snap.docs.map(d => ({ id:d.id, ...d.data() }));
   }
 
-  async function listAllTasks() {
-    const snap = await db.collection(COL.tasks).orderBy("deadline", "asc").get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  }
-
-  // --- COMMUNICATIONS ---
-  async function createCommunication(c) {
-    const u = getUser();
-    const doc = {
-      date: c.date,
-      status: c.status, // Idea/In progress/Done etc
-      type: c.type,     // Announcement, etc
-      campaign: c.campaign || "None - Standalone",
-      subject: c.subject.trim(),
-      audience: c.audience.trim(),
-      channels: {
-        email: !!c.channels.email,
-        purespace: !!c.channels.purespace,
-        other: !!c.channels.other
-      },
-
-      // Your screenshot section
-      workflow: {
-        contentReceived: !!c.workflow.contentReceived,
-        contentApproved: !!c.workflow.contentApproved,
-        designsReceived: !!c.workflow.designsReceived,
-        designsApproved: !!c.workflow.designsApproved,
-      },
-
-      // Mandatory (your request)
-      contentOwner: c.contentOwner.trim(),
-      designRequirements: c.designRequirements.trim(),
-
-      approvalNotes: c.approvalNotes || "",
-      generalNotes: c.generalNotes || "",
-
-      priority: c.priority || "Medium",
-      deadline: c.deadline || "",
-
-      createdAt: nowIso(),
-      createdBy: u?.email || "",
-      updatedAt: nowIso(),
-      updatedBy: u?.email || "",
+  async function createTask(data){
+    const payload = {
+      projectId: data.projectId,
+      name: (data.name || "").trim(),
+      description: data.description || "",
+      status: data.status || "Pending",
+      priority: data.priority || "Medium",
+      owner: (data.owner || "").trim(),
+      supportTeam: data.supportTeam || "",
+      deadline: data.deadline || "",
+      targetedInternalVolunteers: num(data.targetedInternalVolunteers),
+      targetedExternalVolunteers: num(data.targetedExternalVolunteers),
+      nextSteps: data.nextSteps || "",
+      notes: data.notes || "",
+      createdAt: Date.now(),
+      createdAtIso: nowIso(),
     };
-    const ref = await db.collection(COL.communications).add(doc);
-    await logAudit({ type: "communication", title: doc.subject, action: "create", entityId: ref.id });
+
+    const ref = await db.collection(COL.tasks).add(payload);
+    await logAudit({ type:"task", title: payload.name, action:"created", changes: payload });
     return ref.id;
   }
 
-  async function listCommunications() {
-    const snap = await db.collection(COL.communications).orderBy("date", "desc").get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  async function updateTask(id, patch, before){
+    const clean = { ...patch };
+    await db.collection(COL.tasks).doc(id).set(clean, { merge:true });
+    await logAudit({
+      type:"task",
+      title: before?.name || id,
+      action:"updated",
+      changes:{ before: before || null, after: clean }
+    });
   }
 
-  async function updateCommunication(id, patch, beforeDoc) {
-    const u = getUser();
-    patch.updatedAt = nowIso();
-    patch.updatedBy = u?.email || "";
-    await db.collection(COL.communications).doc(id).update(patch);
-
-    const fields = Object.keys(patch).filter(k => !["updatedAt","updatedBy"].includes(k));
-    const changes = diffObjects(beforeDoc, { ...beforeDoc, ...patch }, fields);
-    await logAudit({ type: "communication", title: beforeDoc?.subject || "Communication", action: "update", entityId: id, changes });
+  // -------- Communications --------
+  async function listCommunications(){
+    const snap = await db.collection(COL.communications).orderBy("createdAt","desc").get();
+    return snap.docs.map(d => ({ id:d.id, ...d.data() }));
   }
 
-  // --- LEAVES ---
-  async function createLeave(l) {
-    const u = getUser();
-    const doc = {
-      member: l.member,
-      startDate: l.startDate,
-      endDate: l.endDate,
-      note: l.note || "",
-      createdAt: nowIso(),
-      createdBy: u?.email || ""
+  async function createCommunication(data){
+    const payload = {
+      date: data.date || "",
+      status: data.status || "Idea",
+      type: data.type || "Announcement",
+      campaign: data.campaign || "None - Standalone",
+      subject: (data.subject || "").trim(),
+      audience: (data.audience || "").trim(),
+      channels: data.channels || { email:false, purespace:false, other:false },
+      workflow: data.workflow || {},
+      contentOwner: (data.contentOwner || "").trim(),
+      designRequirements: (data.designRequirements || "").trim(),
+      approvalNotes: data.approvalNotes || "",
+      generalNotes: data.generalNotes || "",
+      priority: data.priority || "Medium",
+      deadline: data.deadline || "",
+      createdAt: Date.now(),
+      createdAtIso: nowIso(),
     };
-    const ref = await db.collection(COL.leaves).add(doc);
-    await logAudit({ type: "leave", title: `${doc.member} leave`, action: "create", entityId: ref.id });
+
+    const ref = await db.collection(COL.communications).add(payload);
+    await logAudit({ type:"communication", title: payload.subject, action:"created", changes: payload });
     return ref.id;
   }
 
-  async function listLeaves() {
+  async function updateCommunication(id, patch, before){
+    await db.collection(COL.communications).doc(id).set(patch, { merge:true });
+    await logAudit({
+      type:"communication",
+      title: before?.subject || id,
+      action:"updated",
+      changes:{ before: before || null, after: patch }
+    });
+  }
+
+  // -------- Leaves --------
+  async function listLeaves(){
     const snap = await db.collection(COL.leaves).orderBy("startDate","asc").get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    return snap.docs.map(d => ({ id:d.id, ...d.data() }));
   }
 
-  async function listAudit() {
-    // rules restrict reading to admin
-    const snap = await db.collection(COL.audit).orderBy("at","desc").limit(300).get();
-    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  async function createLeave(data){
+    const payload = {
+      member: (data.member || "").trim(),
+      startDate: data.startDate || "",
+      endDate: data.endDate || "",
+      note: data.note || "",
+      createdAt: Date.now(),
+      createdAtIso: nowIso(),
+    };
+    const ref = await db.collection(COL.leaves).add(payload);
+    await logAudit({ type:"leave", title: payload.member, action:"created", changes: payload });
+    return ref.id;
   }
 
-  return {
-    watchAuth,
-    loadRole,
-    loadMembers,
-    getMembers,
-    getRole,
-    getUser,
-    createProject,
-    updateProject,
-    listProjects,
-    createTask,
-    updateTask,
-    listTasksByProject,
-    listAllTasks,
-    createCommunication,
-    updateCommunication,
-    listCommunications,
-    createLeave,
-    listLeaves,
+  async function updateLeave(id, patch, before){
+    await db.collection(COL.leaves).doc(id).set(patch, { merge:true });
+    await logAudit({
+      type:"leave",
+      title: before?.member || id,
+      action:"updated",
+      changes:{ before: before || null, after: patch }
+    });
+  }
+
+  // -------- Audit (admin reads) --------
+  async function listAudit(limit=250){
+    const snap = await db.collection(COL.audit).orderBy("at","desc").limit(limit).get();
+    return snap.docs.map(d => ({ id:d.id, ...d.data() }));
+  }
+
+  window.Store = {
+    ensureRole, loadRole, getRole, whoAmI,
+    listMembers,
+
+    listProjects, createProject, updateProject,
+    listAllTasks, createTask, updateTask,
+
+    listCommunications, createCommunication, updateCommunication,
+    listLeaves, createLeave, updateLeave,
+
     listAudit,
-    diffObjects,
   };
 })();
