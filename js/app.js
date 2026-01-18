@@ -83,7 +83,10 @@ async function refreshAll(){
   renderKanban();
   renderWorkload();
   renderComms();
+  if (window.FullCalendar) {
   renderCalendar();
+}
+
   await renderExportPreview();
 
   if (Store.getRole() === "admin") {
@@ -995,3 +998,4 @@ function init(){
 }
 
 init();
+
